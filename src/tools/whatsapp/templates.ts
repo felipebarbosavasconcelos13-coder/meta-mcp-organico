@@ -55,7 +55,7 @@ export function registerWhatsappTemplateTools(server: McpServer, client: MetaCli
       name: z.string().regex(/^[a-z0-9_]{1,512}$/).describe("Template name (lowercase, digits, underscores)"),
       language: z.string().describe("Language code, e.g. pt_BR"),
       category: z.enum(["MARKETING", "UTILITY", "AUTHENTICATION"]).describe("Template category (affects price and review)"),
-      components: z.array(z.record(z.unknown())).min(1).describe("HEADER/BODY/FOOTER/BUTTONS components"),
+      components: z.array(z.record(z.string(), z.unknown())).min(1).describe("HEADER/BODY/FOOTER/BUTTONS components"),
       parameter_format: z.enum(["POSITIONAL", "NAMED"]).optional().describe("Variable style: {{1}} (default) or {{name}}"),
       allow_category_change: z.boolean().optional().describe("Let Meta recategorize instead of rejecting"),
     },

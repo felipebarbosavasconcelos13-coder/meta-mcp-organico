@@ -100,6 +100,7 @@ const whatsappEntry = z.union([
 const accountsFileSchema = z.object({
   default: z.string().optional(),
   accounts: z.record(
+    z.string(),
     z.object({
       label: z.string().optional(),
       aliases: z.array(z.string()).optional(),
