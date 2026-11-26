@@ -1,32 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { z } from "zod";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MetaClient } from "../src/services/meta-client.js";
 import { registerIgProfileTools } from "../src/tools/instagram/profile.js";
 import { registerIgPublishingTools } from "../src/tools/instagram/publishing.js";
 import { registerIgMentionTools } from "../src/tools/instagram/mentions.js";
+import { emptyConfig } from "../src/config.js";
+import { captureTools } from "./helpers.js";
 
 function capture(status = "FINISHED") {
-  const tools = new Map<string, { schema: z.ZodRawShape; handler: (args: any) => Promise<any> }>();
   const calls: Array<{ method: string; path: string; params?: Record<string, unknown> }> = [];
-  const server = { tool(name: string, _description: string, schema: z.ZodRawShape, handler: (args: any) => Promise<any>) {
-    tools.set(name, { schema, handler });
-  } } as unknown as McpServer;
-  const client = {
+  const scoped = {
+    account: { key: "account" },
     igUserId: "account",
     async ig(method: string, path: string, params?: Record<string, unknown>) {
       calls.push({ method, path, params });
       return { data: method === "GET" ? { status_code: status } : { id: `container-${calls.length}` } };
     },
-  } as unknown as MetaClient;
-  registerIgProfileTools(server, client);
-  registerIgPublishingTools(server, client);
-  registerIgMentionTools(server, client);
-  return { calls, async run(name: string, args: Record<string, unknown>) {
-    const tool = tools.get(name)!;
-    return tool.handler(z.object(tool.schema).parse(args));
-  } };
+  };
+  const client = { scope: async () => scoped } as unknown as MetaClient;
+  const { run } = captureTools(client, registerIgProfileTools, registerIgPublishingTools, registerIgMentionTools);
+  return { calls, run };
 }
 
 test("mentioned comments use a user field expansion and documented defaults", async () => {
@@ -173,7 +166,7 @@ test("public Threads oEmbed does not require or send a token", async () => {
     return new Response(JSON.stringify({ html: "<blockquote></blockquote>" }), { headers: { "content-type": "application/json" } });
   };
   try {
-    const client = new MetaClient({ appId: "", appSecret: "", instagramAccessToken: "", instagramUserId: "", instagramMessagingAccessToken: "", instagramPageId: "", threadsAccessToken: "", threadsUserId: "" });
+    const client = new MetaClient(emptyConfig());
     await client.threadsOembed({ url: "https://www.threads.com/@user/post/id" });
     const url = new URL(requestedUrl);
     assert.equal(url.pathname, "/v1.0/oembed");

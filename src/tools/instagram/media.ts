@@ -1,105 +1,117 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MetaClient } from "../../services/meta-client.js";
+import { defineTool, withPaging } from "../define.js";
+
+const MEDIA_FIELDS = "id,caption,media_type,media_product_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count";
 
 export function registerIgMediaTools(server: McpServer, client: MetaClient): void {
-  // ─── ig_get_media_list ───────────────────────────────────────
-  server.tool(
-    "ig_get_media_list",
-    "Get list of media published on the Instagram account.",
-    {
+  defineTool(server, client, {
+    name: "ig_get_media_list",
+    description: "Get the media published on an Instagram account (feed posts and reels; stories are listed by ig_get_stories).",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get media list failed",
+    schema: {
       limit: z.number().optional().describe("Number of results (max 100, default 25)"),
       after: z.string().optional().describe("Pagination cursor for next page"),
       before: z.string().optional().describe("Pagination cursor for previous page"),
+      since: z.string().optional().describe("Only media after this date (Unix timestamp or ISO 8601)"),
+      until: z.string().optional().describe("Only media before this date (Unix timestamp or ISO 8601)"),
     },
-    async ({ limit, after, before }) => {
-      try {
-        const params: Record<string, unknown> = {
-          fields: "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count",
-        };
-        if (limit) params.limit = limit;
-        if (after) params.after = after;
-        if (before) params.before = before;
-        const { data, rateLimit } = await client.ig("GET", `/${client.igUserId}/media`, params);
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get media list failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async (args, c) =>
+      c.ig("GET", `/${c.igUserId}/media`, withPaging({ fields: MEDIA_FIELDS }, args)),
+  });
 
-  // ─── ig_get_media ────────────────────────────────────────────
-  server.tool(
-    "ig_get_media",
-    "Get details of a specific Instagram media post.",
-    {
+  defineTool(server, client, {
+    name: "ig_get_stories",
+    description: "Get the account's currently live Stories (last 24h). Story insights must be read while the story is live.",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get stories failed",
+    schema: {
+      fields: z.string().optional().describe("Comma-separated fields (default: id,media_type,media_url,permalink,thumbnail_url,timestamp)"),
+    },
+    handler: async ({ fields }, c) =>
+      c.ig("GET", `/${c.igUserId}/stories`, {
+        fields: fields || "id,media_type,media_url,permalink,thumbnail_url,timestamp",
+      }),
+  });
+
+  defineTool(server, client, {
+    name: "ig_get_media",
+    description: "Get details of a specific Instagram media post.",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get media failed",
+    schema: {
       media_id: z.string().describe("Media ID"),
-      fields: z.string().optional().describe("Comma-separated fields (default: id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count)"),
+      fields: z.string().optional().describe(`Comma-separated fields (default: ${MEDIA_FIELDS}). Also available: children{media_url,media_type}, collaborators, shortcode, is_shared_to_feed`),
     },
-    async ({ media_id, fields }) => {
-      try {
-        const f = fields || "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count";
-        const { data, rateLimit } = await client.ig("GET", `/${media_id}`, { fields: f });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get media failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ media_id, fields }, c) => c.ig("GET", `/${media_id}`, { fields: fields || MEDIA_FIELDS }),
+  });
 
-  // ─── ig_delete_media ─────────────────────────────────────────
-  server.tool(
-    "ig_delete_media",
-    "Delete an Instagram media post (posts, carousels, reels, stories). This action is irreversible. Requires instagram_manage_contents permission.",
-    {
+  defineTool(server, client, {
+    name: "ig_delete_media",
+    description: "Delete an Instagram media post (posts, carousels, reels, stories). This action is irreversible. Requires instagram_manage_contents permission.",
+    platform: "instagram",
+    kind: "destructive",
+    errorLabel: "Delete media failed",
+    schema: {
       media_id: z.string().describe("Media ID to delete"),
     },
-    async ({ media_id }) => {
-      try {
-        const { data, rateLimit } = await client.ig("DELETE", `/${media_id}`);
-        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Delete media failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
-
-  // ─── ig_get_media_insights ───────────────────────────────────
-  server.tool(
-    "ig_get_media_insights",
-    "Get insights/analytics for a specific media post. Note: 'impressions' and 'video_views' were deprecated in v22.0 — use 'views' instead. Available metrics: views, reach, saved, shares, likes, comments, reposts, reels_skip_rate.",
-    {
-      media_id: z.string().describe("Media ID"),
-      metric: z.string().optional().describe("Comma-separated metrics (default: views,reach,saved,shares). For REEL add: likes,comments,reposts,reels_skip_rate"),
+    handler: async ({ media_id }, c) => {
+      const { data, rateLimit } = await c.ig("DELETE", `/${media_id}`);
+      return { data: { success: true, ...(data as object) }, rateLimit };
     },
-    async ({ media_id, metric }) => {
-      try {
-        const m = metric || "views,reach,saved,shares";
-        const { data, rateLimit } = await client.ig("GET", `/${media_id}/insights`, { metric: m });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get media insights failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+  });
 
-  // ─── ig_toggle_comments ──────────────────────────────────────
-  server.tool(
-    "ig_toggle_comments",
-    "Enable or disable comments on an Instagram media post.",
-    {
+  defineTool(server, client, {
+    name: "ig_get_media_insights",
+    description:
+      "Get insights for a media post. Feed/carousel: views,reach,saved,shares,likes,comments,total_interactions,reposts,profile_visits,follows. Reels add reels_skip_rate,ig_reels_avg_watch_time,ig_reels_video_view_total_time,crossposted_views,facebook_views. Stories: views,reach,replies,navigation,shares,link_clicks (read while live). Deprecated: impressions, plays, video_views (use views).",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get media insights failed",
+    schema: {
+      media_id: z.string().describe("Media ID"),
+      metric: z.string().optional().describe("Comma-separated metrics (default: views,reach,saved,shares)"),
+      breakdown: z.string().optional().describe("Breakdown supported by the metric, e.g. action_type for navigation"),
+    },
+    handler: async ({ media_id, metric, breakdown }, c) => {
+      const params: Record<string, unknown> = { metric: metric || "views,reach,saved,shares" };
+      if (breakdown) params.breakdown = breakdown;
+      return c.ig("GET", `/${media_id}/insights`, params);
+    },
+  });
+
+  defineTool(server, client, {
+    name: "ig_toggle_comments",
+    description: "Enable or disable comments on an Instagram media post.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Toggle comments failed",
+    schema: {
       media_id: z.string().describe("Media ID"),
       enabled: z.boolean().describe("true to enable comments, false to disable"),
     },
-    async ({ media_id, enabled }) => {
-      try {
-        const { data, rateLimit } = await client.ig("POST", `/${media_id}`, {
-          comment_enabled: enabled,
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ success: true, comment_enabled: enabled, ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Toggle comments failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ media_id, enabled }, c) => {
+      const { data, rateLimit } = await c.ig("POST", `/${media_id}`, { comment_enabled: enabled });
+      return { data: { success: true, comment_enabled: enabled, ...(data as object) }, rateLimit };
+    },
+  });
+
+  defineTool(server, client, {
+    name: "ig_get_collaborative_media",
+    description: "Get media where the account is a collaborator (collab posts).",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get collaborative media failed",
+    schema: {
+      limit: z.number().optional().describe("Number of results"),
+      after: z.string().optional().describe("Pagination cursor"),
+    },
+    handler: async (args, c) =>
+      c.ig("GET", `/${c.igUserId}/collaborative_media`, withPaging({ fields: "id,caption,media_type,media_url,permalink,timestamp,username" }, args)),
+  });
 }

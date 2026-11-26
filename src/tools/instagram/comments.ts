@@ -1,143 +1,132 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MetaClient } from "../../services/meta-client.js";
+import { defineTool, withPaging } from "../define.js";
 
 export function registerIgCommentTools(server: McpServer, client: MetaClient): void {
-  // ─── ig_get_comments ─────────────────────────────────────────
-  server.tool(
-    "ig_get_comments",
-    "Get comments on a specific Instagram media post.",
-    {
+  defineTool(server, client, {
+    name: "ig_get_comments",
+    description: "Get comments on a specific Instagram media post.",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get comments failed",
+    schema: {
       media_id: z.string().describe("Media ID"),
       limit: z.number().optional().describe("Number of comments to return"),
       after: z.string().optional().describe("Pagination cursor"),
     },
-    async ({ media_id, limit, after }) => {
-      try {
-        const params: Record<string, unknown> = {
-          fields: "id,text,username,timestamp,like_count,replies{id,text,username,timestamp}",
-        };
-        if (limit) params.limit = limit;
-        if (after) params.after = after;
-        const { data, rateLimit } = await client.ig("GET", `/${media_id}/comments`, params);
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get comments failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ media_id, ...paging }, c) =>
+      c.ig("GET", `/${media_id}/comments`, withPaging({
+        fields: "id,text,username,timestamp,like_count,hidden,from,replies{id,text,username,timestamp}",
+      }, paging)),
+  });
 
-  // ─── ig_get_comment ──────────────────────────────────────────
-  server.tool(
-    "ig_get_comment",
-    "Get details of a specific comment.",
-    {
+  defineTool(server, client, {
+    name: "ig_get_comment",
+    description: "Get details of a specific comment.",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get comment failed",
+    schema: {
       comment_id: z.string().describe("Comment ID"),
     },
-    async ({ comment_id }) => {
-      try {
-        const { data, rateLimit } = await client.ig("GET", `/${comment_id}`, {
-          fields: "id,text,username,timestamp,like_count,parent_id,media",
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get comment failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ comment_id }, c) =>
+      c.ig("GET", `/${comment_id}`, { fields: "id,text,username,timestamp,like_count,hidden,parent_id,from,media" }),
+  });
 
-  // ─── ig_post_comment ─────────────────────────────────────────
-  server.tool(
-    "ig_post_comment",
-    "Post a top-level comment on a media post.",
-    {
+  defineTool(server, client, {
+    name: "ig_post_comment",
+    description: "Post a top-level comment on a media post as the account.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Post comment failed",
+    schema: {
       media_id: z.string().describe("Media ID to comment on"),
       message: z.string().describe("Comment text"),
     },
-    async ({ media_id, message }) => {
-      try {
-        const { data, rateLimit } = await client.ig("POST", `/${media_id}/comments`, { message });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Post comment failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ media_id, message }, c) => c.ig("POST", `/${media_id}/comments`, { message }),
+  });
 
-  // ─── ig_get_replies ──────────────────────────────────────────
-  server.tool(
-    "ig_get_replies",
-    "Get replies to a specific comment.",
-    {
+  defineTool(server, client, {
+    name: "ig_get_replies",
+    description: "Get replies to a specific comment.",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get replies failed",
+    schema: {
       comment_id: z.string().describe("Comment ID to get replies for"),
       limit: z.number().optional().describe("Number of replies to return"),
       after: z.string().optional().describe("Pagination cursor"),
     },
-    async ({ comment_id, limit, after }) => {
-      try {
-        const params: Record<string, unknown> = {
-          fields: "id,text,username,timestamp,like_count",
-        };
-        if (limit) params.limit = limit;
-        if (after) params.after = after;
-        const { data, rateLimit } = await client.ig("GET", `/${comment_id}/replies`, params);
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get replies failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ comment_id, ...paging }, c) =>
+      c.ig("GET", `/${comment_id}/replies`, withPaging({ fields: "id,text,username,timestamp,like_count" }, paging)),
+  });
 
-  // ─── ig_reply_to_comment ─────────────────────────────────────
-  server.tool(
-    "ig_reply_to_comment",
-    "Reply to a specific comment.",
-    {
+  defineTool(server, client, {
+    name: "ig_reply_to_comment",
+    description: "Reply publicly to a specific comment. To answer privately in the DM inbox, use ig_private_reply.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Reply failed",
+    schema: {
       comment_id: z.string().describe("Comment ID to reply to"),
       message: z.string().describe("Reply text"),
     },
-    async ({ comment_id, message }) => {
-      try {
-        const { data, rateLimit } = await client.ig("POST", `/${comment_id}/replies`, { message });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Reply failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ comment_id, message }, c) => c.ig("POST", `/${comment_id}/replies`, { message }),
+  });
 
-  // ─── ig_hide_comment ─────────────────────────────────────────
-  server.tool(
-    "ig_hide_comment",
-    "Hide or unhide a comment on your post.",
-    {
+  defineTool(server, client, {
+    name: "ig_hide_comment",
+    description: "Hide or unhide a comment on your post.",
+    platform: "instagram",
+    kind: "destructive",
+    errorLabel: "Hide comment failed",
+    schema: {
       comment_id: z.string().describe("Comment ID"),
       hide: z.boolean().describe("true to hide, false to unhide"),
     },
-    async ({ comment_id, hide }) => {
-      try {
-        const { data, rateLimit } = await client.ig("POST", `/${comment_id}`, { hide });
-        return { content: [{ type: "text", text: JSON.stringify({ success: true, hidden: hide, ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Hide comment failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ comment_id, hide }, c) => {
+      const { data, rateLimit } = await c.ig("POST", `/${comment_id}`, { hide });
+      return { data: { success: true, hidden: hide, ...(data as object) }, rateLimit };
+    },
+  });
 
-  // ─── ig_delete_comment ───────────────────────────────────────
-  server.tool(
-    "ig_delete_comment",
-    "Delete a comment from your media post. This action is irreversible.",
-    {
+  defineTool(server, client, {
+    name: "ig_delete_comment",
+    description: "Delete a comment from your media post. This action is irreversible.",
+    platform: "instagram",
+    kind: "destructive",
+    errorLabel: "Delete comment failed",
+    schema: {
       comment_id: z.string().describe("Comment ID to delete"),
     },
-    async ({ comment_id }) => {
-      try {
-        const { data, rateLimit } = await client.ig("DELETE", `/${comment_id}`);
-        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Delete comment failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ comment_id }, c) => {
+      const { data, rateLimit } = await c.ig("DELETE", `/${comment_id}`);
+      return { data: { success: true, ...(data as object) }, rateLimit };
+    },
+  });
+
+  defineTool(server, client, {
+    name: "ig_like",
+    description: "Like a media post or comment as the account (Instagram engagement API, April 2026). Requires instagram_manage_engagement.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Like failed",
+    schema: {
+      target_id: z.string().describe("Media ID or comment ID to like"),
+    },
+    handler: async ({ target_id }, c) => c.ig("POST", `/${c.igUserId}/likes`, { target_id }),
+  });
+
+  defineTool(server, client, {
+    name: "ig_unlike",
+    description: "Remove the account's like from a media post or comment. Requires instagram_manage_engagement.",
+    platform: "instagram",
+    kind: "destructive",
+    errorLabel: "Unlike failed",
+    schema: {
+      target_id: z.string().describe("Media ID or comment ID to unlike"),
+    },
+    handler: async ({ target_id }, c) => c.ig("DELETE", `/${c.igUserId}/likes`, { target_id }),
+  });
 }

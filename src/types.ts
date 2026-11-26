@@ -1,7 +1,10 @@
 export interface RateLimit {
+  /** x-app-usage: percentage of the app's budget used. */
   callCount?: number;
   totalCpuTime?: number;
   totalTime?: number;
+  /** x-business-use-case-usage entries, including estimated_time_to_regain_access (minutes). */
+  business?: Array<Record<string, number | string>>;
 }
 
 export interface ApiResponse<T = unknown> {

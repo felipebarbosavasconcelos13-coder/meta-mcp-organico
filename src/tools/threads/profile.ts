@@ -1,66 +1,48 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MetaClient } from "../../services/meta-client.js";
+import { defineTool, withPaging } from "../define.js";
+
+export const THREADS_PROFILE_FIELDS = "id,username,name,threads_profile_picture_url,threads_biography,is_verified";
 
 export function registerThreadsProfileTools(server: McpServer, client: MetaClient): void {
-  // ─── threads_get_profile ─────────────────────────────────────
-  server.tool(
-    "threads_get_profile",
-    "Get Threads user profile information including verification status.",
-    {},
-    async () => {
-      try {
-        const { data, rateLimit } = await client.threads("GET", `/${client.threadsUserId}`, {
-          fields: "id,username,name,threads_profile_picture_url,threads_biography,is_verified",
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get profile failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+  defineTool(server, client, {
+    name: "threads_get_profile",
+    description: "Get the account's Threads profile information including verification status.",
+    platform: "threads",
+    kind: "read",
+    errorLabel: "Get profile failed",
+    schema: {},
+    handler: async (_args, c) => c.threads("GET", `/${await c.threadsUserId()}`, { fields: THREADS_PROFILE_FIELDS }),
+  });
 
-  // ─── threads_lookup_profile ──────────────────────────────────
-  server.tool(
-    "threads_lookup_profile",
-    "Look up a public Threads user's profile by username (Profile Discovery). Requires threads_profile_discovery permission and target must have >=100 followers; with standard access, only @meta, @threads, @instagram, and @facebook are queryable.",
-    {
+  defineTool(server, client, {
+    name: "threads_lookup_profile",
+    description: "Look up a public Threads user's profile by username (Profile Discovery). Requires threads_profile_discovery permission and target must have >=100 followers; with standard access, only @meta, @threads, @instagram, and @facebook are queryable.",
+    platform: "threads",
+    kind: "read",
+    errorLabel: "Profile lookup failed",
+    schema: {
       username: z.string().describe("Threads username to look up (exact match, without @)"),
     },
-    async ({ username }) => {
-      try {
-        const { data, rateLimit } = await client.threads("GET", "/profile_lookup", { username });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Profile lookup failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ username }, c) => c.threads("GET", "/profile_lookup", { username: username.replace(/^@/, "") }),
+  });
 
-  // ─── threads_get_user_threads ────────────────────────────────
-  server.tool(
-    "threads_get_user_threads",
-    "Get all threads published by the user (alias for threads_get_posts with user context).",
-    {
+  defineTool(server, client, {
+    name: "threads_get_user_threads",
+    description: "Get all threads published by the account (lighter field set than threads_get_posts).",
+    platform: "threads",
+    kind: "read",
+    errorLabel: "Get user threads failed",
+    schema: {
       limit: z.number().optional().describe("Number of results"),
       since: z.string().optional().describe("Start date (ISO 8601 or Unix timestamp)"),
       until: z.string().optional().describe("End date (ISO 8601 or Unix timestamp)"),
       after: z.string().optional().describe("Pagination cursor"),
     },
-    async ({ limit, since, until, after }) => {
-      try {
-        const params: Record<string, unknown> = {
-          fields: "id,media_product_type,media_type,text,permalink,timestamp,shortcode,is_quote_post,topic_tag",
-        };
-        if (limit) params.limit = limit;
-        if (since) params.since = since;
-        if (until) params.until = until;
-        if (after) params.after = after;
-        const { data, rateLimit } = await client.threads("GET", `/${client.threadsUserId}/threads`, params);
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get user threads failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async (paging, c) =>
+      c.threads("GET", `/${await c.threadsUserId()}/threads`, withPaging({
+        fields: "id,media_product_type,media_type,text,permalink,timestamp,shortcode,is_quote_post,topic_tag",
+      }, paging)),
+  });
 }

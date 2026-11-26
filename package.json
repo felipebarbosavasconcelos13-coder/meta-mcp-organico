@@ -1,8 +1,7 @@
 {
-  "name": "@mikusnuz/meta-mcp",
-  "version": "2.2.2",
-  "mcpName": "io.github.mikusnuz/meta",
-  "description": "MCP server for Instagram Graph API, Threads API & Meta platform management",
+  "name": "meta-mcp-organico",
+  "version": "3.0.0",
+  "description": "Multi-account MCP server for Instagram Graph API, Threads API, WhatsApp Cloud API & Meta platform management",
   "type": "module",
   "bin": {
     "meta-mcp": "dist/index.js"
@@ -18,37 +17,42 @@
   "files": [
     "dist/**/*",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "accounts.example.json"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts"
   },
   "keywords": [
+    "ai",
+    "claude",
+    "graph-api",
+    "instagram",
     "mcp",
     "meta",
-    "instagram",
-    "threads",
-    "graph-api",
     "model-context-protocol",
-    "ai",
-    "claude"
+    "multi-account",
+    "threads",
+    "whatsapp",
+    "whatsapp-cloud-api"
   ],
-  "author": "mikusnuz",
+  "author": "mikusnuz (original); fork by felipebarbosavasconcelos13-coder",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mikusnuz/meta-mcp.git"
+    "url": "git+https://github.com/felipebarbosavasconcelos13-coder/meta-mcp-organico.git"
   },
-  "homepage": "https://github.com/mikusnuz/meta-mcp",
+  "homepage": "https://github.com/felipebarbosavasconcelos13-coder/meta-mcp-organico",
   "bugs": {
-    "url": "https://github.com/mikusnuz/meta-mcp/issues"
+    "url": "https://github.com/felipebarbosavasconcelos13-coder/meta-mcp-organico/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

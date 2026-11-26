@@ -12,7 +12,10 @@ export interface SpoilerRange {
   length: number;
 }
 
-export const INSTAGRAM_GRAPH_BASE = "https://graph.facebook.com/v26.0";
+export const GRAPH_API_VERSION = "v26.0";
+export const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+/** @deprecated use GRAPH_BASE */
+export const INSTAGRAM_GRAPH_BASE = GRAPH_BASE;
 export const THREADS_GRAPH_BASE = "https://graph.threads.net/v1.0";
 export const THREADS_AUTH_BASE = "https://graph.threads.net";
 
@@ -112,15 +115,56 @@ export function buildThreadsTextEntities(
   );
 }
 
+export interface InstagramMessageOptions {
+  attachment?: {
+    type: "image" | "video" | "audio" | "file";
+    url?: string;
+    attachment_id?: string;
+  };
+  quickReplies?: Array<{ title: string; payload: string }>;
+  replyToMessageId?: string;
+  humanAgent?: boolean;
+  /** Private reply to a comment instead of a user ID. */
+  recipientCommentId?: string;
+}
+
 export function buildInstagramMessageBody(
   recipientId: string,
-  message: string
+  message: string | undefined,
+  options: InstagramMessageOptions = {}
 ): Record<string, unknown> {
-  return {
-    recipient: { id: recipientId },
-    message: { text: message },
-    messaging_type: "RESPONSE",
+  const body: Record<string, unknown> = {
+    recipient: options.recipientCommentId
+      ? { comment_id: options.recipientCommentId }
+      : { id: recipientId },
   };
+  const content: Record<string, unknown> = {};
+  if (options.attachment) {
+    if (message) throw new Error("Send text and an attachment as separate messages.");
+    const { type, url, attachment_id } = options.attachment;
+    if (!url === !attachment_id) throw new Error("An attachment needs exactly one of url or attachment_id.");
+    content.attachment = { type, payload: url ? { url } : { attachment_id } };
+  } else {
+    if (!message) throw new Error("message (text) or attachment is required.");
+    content.text = message;
+  }
+  if (options.quickReplies?.length) {
+    if (options.attachment) throw new Error("Quick replies can only be sent with a text message.");
+    content.quick_replies = options.quickReplies.map(({ title, payload }) => ({
+      content_type: "text",
+      title,
+      payload,
+    }));
+  }
+  if (options.replyToMessageId) content.reply_to = { mid: options.replyToMessageId };
+  body.message = content;
+  if (options.humanAgent) {
+    body.messaging_type = "MESSAGE_TAG";
+    body.tag = "HUMAN_AGENT";
+  } else {
+    body.messaging_type = "RESPONSE";
+  }
+  return body;
 }
 
 export function buildInstagramConversationParams(
