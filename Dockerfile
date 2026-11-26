@@ -1,6 +1,14 @@
-FROM node:18-alpine
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json ./
+COPY src ./src
+# npm ci runs the prepare script, which compiles src/ into dist/
+RUN npm ci
+
+FROM node:22-alpine
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-COPY dist/ ./dist/
+RUN npm ci --omit=dev --ignore-scripts
+COPY --from=build /app/dist ./dist
+USER node
 ENTRYPOINT ["node", "dist/index.js"]

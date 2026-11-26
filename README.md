@@ -1,37 +1,99 @@
-**English** | [한국어](README.ko.md)
+**English** | [Português (multi-contas)](docs/MULTI-CONTAS.md) | [한국어 (v2)](README.ko.md)
 
-# meta-mcp
+# meta-mcp-organico
 
-[![npm version](https://img.shields.io/npm/v/@mikusnuz/meta-mcp)](https://www.npmjs.com/package/@mikusnuz/meta-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![MCP Badge](https://lobehub.com/badge/mcp/mikusnuz-meta-mcp)](https://lobehub.com/discover/mcp/mikusnuz-meta-mcp)
-
-Full-coverage MCP server for **Instagram Graph API** (v26.0), **Threads API**, and **Meta platform** management.
+Fork of [mikusnuz/meta-mcp](https://github.com/mikusnuz/meta-mcp): an MCP server for **Instagram Graph API** (v26.0), **Threads API**, **WhatsApp Cloud API** and **Meta platform** management, built to operate **many client accounts from one server**.
 
 ## When to Use
 
 Tell your AI assistant things like:
 
-- **"Post a photo to Instagram"** — publish photos, videos, reels, stories, and carousels
-- **"Publish a text post on Threads"** — text posts with polls, GIFs, link attachments, and topic tags
-- **"Get my Instagram follower count and insights"** — account and post-level analytics
-- **"Schedule a carousel post"** — multi-image albums on Instagram (2-10) or Threads (2-20)
-- **"Reply to comments on my latest post"** — read and respond to comments on both platforms
-- **"Cross-post to Instagram and Threads"** — use the built-in `content_publish` prompt
-- **"Get analytics for my Threads account"** — views, likes, replies, reposts, quotes, clicks
-- **"Manage Instagram DMs"** — list conversations, read messages, send replies
+- **"List the accounts you can manage"** — `meta_list_accounts`
+- **"Post this photo on @drrander"** — every tool takes an `account`
+- **"Publish a text post on Threads for Genial"** — polls, GIFs, link attachments, topic tags
+- **"How did Bea's Instagram do this month?"** — account and post insights, stories, collab posts
+- **"Reply privately to this comment"** — `ig_private_reply`, DMs with attachments and quick replies
+- **"Send the appointment reminder template on WhatsApp"** — templates, media, interactive messages
+- **"How much did we spend on WhatsApp per category?"** — pricing and template analytics
 
 > **AI Agent Integration**: See [`llms.txt`](llms.txt) for a machine-readable summary, or copy [`templates/CLAUDE.md`](templates/CLAUDE.md) / [`templates/AGENTS.md`](templates/AGENTS.md) into your project for automatic MCP discovery.
 
 ## Features
 
-- **66 tools** across Instagram (33), Threads (27), and Meta platform (6)
-- **Instagram**: Publish photos/videos/reels/stories/carousels with alt text, manage comments, view insights, search hashtags, handle DMs, manage collaboration invites
-- **Threads**: Publish text/images/videos/carousels with polls, GIFs, topic tags, link attachments, alt text, spoiler flags, ghost posts, reply approvals, location tags, and Instagram Stories cross-sharing; manage replies and pending reply approvals; search posts and locations; profile/mentions discovery; oEmbed; view insights; delete posts
-- **Meta**: Token exchange/refresh/debug, webhook management
-- **2 resources**: Instagram profile, Threads profile
-- **2 prompts**: Cross-platform content publishing, analytics report
-- Rate limit tracking via `x-app-usage` header
+- **99 tools**: Instagram (43), Threads (28), WhatsApp (20), Meta platform (8)
+- **Multi-account**: Instagram accounts discovered from the token, WhatsApp numbers discovered from your businesses, Threads profiles and aliases from an accounts file. Every tool takes an optional `account`.
+- **Safe writes**: with more than one account, write tools refuse to run without `account`; `META_ALLOWED_ACCOUNTS` limits which accounts may be changed. MCP tool annotations mark read-only and destructive tools.
+- **No duplicate posts**: containers are polled with backoff (5 min cap, per Meta), Threads waits for every container (text included), and a failed publish call checks the container before reporting an error.
+- **Token hygiene**: tokens are stripped from paging links and error messages; exchanged/refreshed tokens are masked unless `META_EXPOSE_TOKENS=true`.
+- **Resilient reads**: transient errors (codes 1/2, 5xx, network) are retried; rate limits are reported with `x-app-usage` / `x-business-use-case-usage` instead of hammering the API.
+- **4 resources**: `instagram://profile`, `instagram://profile/{account}`, `threads://profile`, `threads://profile/{account}`
+- **2 prompts**: cross-platform publishing, analytics report
+
+## Multi-account
+
+### How accounts are found
+
+1. **Environment (default account)** — `INSTAGRAM_USER_ID`, `THREADS_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` keep working as before and become the default account (`default`).
+2. **Instagram discovery** — `GET /me/accounts` with `INSTAGRAM_ACCESS_TOKEN` lists every Facebook Page the token manages and its linked Instagram professional account. Each one becomes an account keyed by its username. The Page token found here is kept in memory (never returned) and used for DMs. Cached for `META_ACCOUNTS_TTL` seconds (default 900); unknown accounts trigger a refresh.
+3. **WhatsApp discovery** — when `WHATSAPP_ACCESS_TOKEN` (or `WHATSAPP_BUSINESS_ID`) is set: businesses → owned and client WhatsApp Business Accounts → phone numbers. Each number becomes an account `wa-<digits>`, also reachable by its digits or verified name.
+4. **Accounts file** — `META_ACCOUNTS_FILE=/path/accounts.json` adds aliases, the default account, Threads profiles (each needs its own token) and links an Instagram account, a Threads profile and a WhatsApp number into one client. The file holds **env var names**, never tokens. See [`accounts.example.json`](accounts.example.json).
+
+```json
+{
+  "default": "genial",
+  "accounts": {
+    "genial": {
+      "label": "Genial Soluções Digitais",
+      "aliases": ["gsd"],
+      "instagram": "@genialsolucoesdigitais",
+      "threads": { "token_env": "THREADS_TOKEN_GENIAL" },
+      "whatsapp": "+55 11 99999-0000"
+    },
+    "rander": {
+      "instagram": { "username": "drrander", "page_token_env": "PAGE_TOKEN_RANDER" },
+      "whatsapp": { "phone_number_id": "123456789012345", "waba_id": "987654321098765", "token_env": "WA_TOKEN_RANDER" }
+    }
+  }
+}
+```
+
+### Choosing an account
+
+`account` accepts the key, an alias, `@username`, the Instagram/Page/Threads ID, the WhatsApp phone number ID, or the phone number in any format. Reads without `account` use the default account; **write tools without `account` fail when the platform has more than one account** and list the options. `meta_whoami` shows what a value resolves to.
+
+Every result includes `_account` so the agent can confirm where it acted.
+
+### Tokens per platform
+
+- **Instagram**: one user or system-user token publishes for every account whose Page it manages (CREATE_CONTENT/MANAGE task). Override per account with `token_env`.
+- **Instagram DMs**: need the Page token (MESSAGE task) — discovered automatically, or `page_token_env` / `INSTAGRAM_MESSAGING_ACCESS_TOKEN`.
+- **Threads**: each profile has its own token (`threads.token_env`). The user ID is looked up with `/me` when not given.
+- **WhatsApp**: a system-user token with `whatsapp_business_messaging` and `whatsapp_business_management` (falls back to `INSTAGRAM_ACCESS_TOKEN`). Override per number with `token_env`.
+
+## WhatsApp
+
+This server covers day-to-day **sending and management**: text, templates, media, interactive messages (buttons, lists, CTA URL), location, reactions, mark as read, media upload, templates (list/create/delete), business profile, phone numbers, pricing/message analytics and template analytics.
+
+Not covered here, by design:
+
+- **Receiving messages** — the Cloud API has no inbox endpoint; incoming messages arrive by webhook. Keep them in your CRM/webhook receiver.
+- **Number onboarding** (add/verify/register numbers), payment setup and business verification — use Meta's official hosted MCP alongside this one:
+
+```bash
+claude mcp add --transport http whatsapp-business https://mcp.facebook.com/whatsapp_business_tools
+```
+
+Free-form messages are delivered only within 24 hours of the customer's last message; outside that window use `whatsapp_send_template` (error 131047 says so).
+
+## What's New in v3.0.0
+
+- **Multi-account** across Instagram, Threads and WhatsApp (see above). **Breaking:** write tools now require `account` when several accounts are available.
+- **WhatsApp Cloud API**: 20 `whatsapp_*` tools.
+- **New Instagram tools**: `ig_get_publishing_limit`, `ig_get_stories`, `ig_get_collaborative_media`, `ig_private_reply`, `ig_send_reaction`, `ig_sender_action`, `ig_reply_to_mention`, `ig_get_mentioned_media`, `ig_like`, `ig_unlike`. Publishing gains `collaborators`, `user_tags` on reels/carousel items/stories and `audio_name`; `ig_send_message` gains attachments, quick replies, `reply_to` and the `HUMAN_AGENT` tag.
+- **New Threads tool**: `threads_repost`; `threads_get_publishing_limit` returns every quota.
+- **New Meta tools**: `meta_list_accounts`, `meta_whoami`.
+- Reliability: backoff polling, Threads text/image/reply containers wait until ready, publish idempotency check.
+- Security: token redaction in paging links and errors, masked exchange/refresh results.
 
 ## What's New in v2.2.1
 
@@ -85,40 +147,40 @@ Tell your AI assistant things like:
 |----------|-------------|-------|
 | **Instagram** | Business or Creator account | Personal accounts cannot use the Graph API. Free to switch in Instagram settings |
 | **Threads** | Any account | All Threads accounts can use the API (Instagram account link no longer required since Sep 2025) |
+| **WhatsApp** | WhatsApp Business Platform (Cloud API) number | System-user token with `whatsapp_business_messaging` and `whatsapp_business_management` |
 | **Meta** (token/webhook tools) | Meta Developer App | Create at [developers.facebook.com](https://developers.facebook.com) |
 
 ## Installation
 
-Requires Node.js 20 or later, including the MCP host's `npx` environment.
+Requires Node.js 20 or later.
 
-### npx (Recommended)
+### From GitHub (no npm publish needed)
 
 ```json
 {
   "mcpServers": {
     "meta": {
       "command": "npx",
-      "args": ["-y", "@mikusnuz/meta-mcp"],
+      "args": ["-y", "github:felipebarbosavasconcelos13-coder/meta-mcp-organico"],
       "env": {
-        "INSTAGRAM_ACCESS_TOKEN": "your_ig_token",
-        "INSTAGRAM_USER_ID": "your_ig_user_id",
-        "INSTAGRAM_MESSAGING_ACCESS_TOKEN": "your_page_access_token",
-        "INSTAGRAM_PAGE_ID": "your_linked_page_id",
-        "THREADS_ACCESS_TOKEN": "your_threads_token",
-        "THREADS_USER_ID": "your_threads_user_id"
+        "INSTAGRAM_ACCESS_TOKEN": "your_user_or_system_user_token",
+        "WHATSAPP_ACCESS_TOKEN": "your_whatsapp_system_user_token",
+        "META_ACCOUNTS_FILE": "/path/to/accounts.json",
+        "THREADS_TOKEN_GENIAL": "threads_token_for_genial"
       }
     }
   }
 }
 ```
 
+The package builds itself on install (`prepare`).
+
 ### Manual
 
 ```bash
-git clone https://github.com/mikusnuz/meta-mcp.git
-cd meta-mcp
-npm install
-npm run build
+git clone https://github.com/felipebarbosavasconcelos13-coder/meta-mcp-organico.git
+cd meta-mcp-organico
+npm install   # also builds dist/
 ```
 
 ```json
@@ -126,189 +188,168 @@ npm run build
   "mcpServers": {
     "meta": {
       "command": "node",
-      "args": ["/path/to/meta-mcp/dist/index.js"],
+      "args": ["/path/to/meta-mcp-organico/dist/index.js"],
       "env": {
-        "INSTAGRAM_ACCESS_TOKEN": "your_ig_token",
-        "INSTAGRAM_USER_ID": "your_ig_user_id",
-        "INSTAGRAM_MESSAGING_ACCESS_TOKEN": "your_page_access_token",
-        "INSTAGRAM_PAGE_ID": "your_linked_page_id",
-        "THREADS_ACCESS_TOKEN": "your_threads_token",
-        "THREADS_USER_ID": "your_threads_user_id"
+        "INSTAGRAM_ACCESS_TOKEN": "your_user_or_system_user_token",
+        "META_ACCOUNTS_FILE": "/path/to/accounts.json"
       }
     }
   }
 }
 ```
 
+Single-account setups from v2 (`INSTAGRAM_USER_ID`, `THREADS_USER_ID`, …) keep working unchanged.
+
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `INSTAGRAM_ACCESS_TOKEN` | For Instagram | Instagram Graph API access token |
-| `INSTAGRAM_USER_ID` | For Instagram | Instagram Business/Creator account ID |
-| `INSTAGRAM_MESSAGING_ACCESS_TOKEN` | For Instagram DMs | Page access token for Instagram Messaging with Facebook Login |
-| `INSTAGRAM_PAGE_ID` | For Instagram DMs | Facebook Page ID linked to the Instagram professional account |
-| `THREADS_ACCESS_TOKEN` | For Threads | Threads API access token |
-| `THREADS_USER_ID` | For Threads | Threads user ID |
-| `META_APP_ID` | For token/webhook tools | Meta App ID |
-| `META_APP_SECRET` | For token/webhook tools | Meta App Secret |
-
-You only need to set the variables for the platforms you use. For example, if you only use Threads, just set `THREADS_ACCESS_TOKEN` and `THREADS_USER_ID`.
+| Variable | Description |
+|----------|-------------|
+| `INSTAGRAM_ACCESS_TOKEN` | User or system-user token (Facebook Login). Publishes for every account whose Page it manages and drives Instagram discovery |
+| `INSTAGRAM_USER_ID` | Optional default Instagram account |
+| `INSTAGRAM_MESSAGING_ACCESS_TOKEN` | Page token for DMs of the default account (other accounts use the discovered Page token) |
+| `INSTAGRAM_PAGE_ID` | Facebook Page linked to the default Instagram account |
+| `THREADS_ACCESS_TOKEN` / `THREADS_USER_ID` | Default Threads account (other profiles: `threads.token_env` in the accounts file) |
+| `WHATSAPP_ACCESS_TOKEN` | System-user token with `whatsapp_business_messaging` + `whatsapp_business_management`; turns on WhatsApp discovery |
+| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_BUSINESS_ACCOUNT_ID` | Optional default WhatsApp number and its WABA |
+| `WHATSAPP_BUSINESS_ID` | Comma-separated business (portfolio) IDs to discover WABAs from (default: `/me/businesses`) |
+| `META_ACCOUNTS_FILE` | Path to the accounts JSON file (aliases, default, Threads tokens by env var name, links) |
+| `META_ALLOWED_ACCOUNTS` | Comma-separated accounts write tools may target (default: all) |
+| `META_ACCOUNTS_TTL` | Discovery cache in seconds (default 900) |
+| `META_DISCOVER_INSTAGRAM` / `META_DISCOVER_WHATSAPP` | `false` turns a discovery off |
+| `META_EXPOSE_TOKENS` | `true` returns full tokens from exchange/refresh tools (default masked) |
+| `META_APP_ID` / `META_APP_SECRET` | For token and webhook tools |
 
 ## Tools
 
-### Meta Platform (6)
+Every tool except the Meta platform ones accepts an optional `account`. *write* and *destructive* tools need it when the platform has more than one account.
 
-| Tool | Description |
-|------|-------------|
-| `meta_exchange_token` | Exchange short-lived token for long-lived token (~60 days) |
-| `meta_refresh_token` | Extend an Instagram/Facebook token or refresh a Threads token (`platform` selects the flow) |
-| `meta_debug_token` | Inspect token validity, expiration, and scopes |
-| `meta_get_app_info` | Get Meta App information |
-| `meta_subscribe_webhook` | Subscribe to webhook notifications |
-| `meta_get_webhook_subscriptions` | List current webhook subscriptions |
+### Meta platform (8)
 
-### Instagram — Publishing (6)
+| Tool | Kind | Description |
+|------|------|-------------|
+| `meta_list_accounts` | read | List every account this server can act on — Instagram accounts discovered from the token, Threads profiles and WhatsApp numbers — with the key/aliases to pass as `account`, which one is the default, and which ones write tools may target. |
+| `meta_whoami` | read | Show which account a given `account` value resolves to for a platform (and whether write tools may use it) without calling the platform. |
+| `meta_exchange_token` | write | Exchange a short-lived token for a long-lived token (valid ~60 days). |
+| `meta_refresh_token` | write | Extend an Instagram/Facebook user token through the token-exchange flow, or refresh a Threads long-lived token through the Threads refresh endpoint. |
+| `meta_debug_token` | read | Debug/inspect an access token to check validity, expiration, scopes and associated user. |
+| `meta_get_app_info` | read | Get Meta App basic information (name, category, namespace, etc.). |
+| `meta_subscribe_webhook` | write | Subscribe to webhook notifications for an object (e.g., 'instagram', 'page', 'whatsapp_business_account'). |
+| `meta_get_webhook_subscriptions` | read | List current webhook subscriptions for the Meta App. |
 
-| Tool | Description |
-|------|-------------|
-| `ig_publish_photo` | Publish a photo post (supports alt_text) |
-| `ig_publish_video` | Publish a video post |
-| `ig_publish_carousel` | Publish a carousel/album (2-10 items, supports alt_text per item) |
-| `ig_publish_reel` | Publish a Reel (supports alt_text) |
-| `ig_publish_story` | Publish a Story (24hr) |
-| `ig_get_container_status` | Check media container processing status |
+### Instagram (43)
 
-### Instagram — Media (5)
+| Tool | Kind | Description |
+|------|------|-------------|
+| `ig_publish_photo` | write | Publish a photo to an Instagram account. |
+| `ig_publish_video` | write | Publish a standalone video as a Reel and share it to the feed. |
+| `ig_publish_carousel` | write | Publish a carousel (album) post with 2-10 images/videos. |
+| `ig_publish_reel` | write | Publish a Reel (short video). |
+| `ig_publish_story` | write | Publish a Story (image or video). |
+| `ig_get_container_status` | read | Check the processing status of a media container: IN_PROGRESS, FINISHED (ready), PUBLISHED, ERROR or EXPIRED. |
+| `ig_get_publishing_limit` | read | Check how many posts the Instagram account has published in the current 24-hour window and its quota (content_publishing_limit). |
+| `ig_get_media_list` | read | Get the media published on an Instagram account (feed posts and reels; stories are listed by ig_get_stories). |
+| `ig_get_stories` | read | Get the account's currently live Stories (last 24h). |
+| `ig_get_media` | read | Get details of a specific Instagram media post. |
+| `ig_delete_media` | destructive | Delete an Instagram media post (posts, carousels, reels, stories). |
+| `ig_get_media_insights` | read | Get insights for a media post. |
+| `ig_toggle_comments` | write | Enable or disable comments on an Instagram media post. |
+| `ig_get_collaborative_media` | read | Get media where the account is a collaborator (collab posts). |
+| `ig_get_comments` | read | Get comments on a specific Instagram media post. |
+| `ig_get_comment` | read | Get details of a specific comment. |
+| `ig_post_comment` | write | Post a top-level comment on a media post as the account. |
+| `ig_get_replies` | read | Get replies to a specific comment. |
+| `ig_reply_to_comment` | write | Reply publicly to a specific comment. |
+| `ig_hide_comment` | destructive | Hide or unhide a comment on your post. |
+| `ig_delete_comment` | destructive | Delete a comment from your media post. |
+| `ig_like` | write | Like a media post or comment as the account (Instagram engagement API, April 2026). |
+| `ig_unlike` | destructive | Remove the account's like from a media post or comment. |
+| `ig_get_profile` | read | Get Instagram Business/Creator account profile information. |
+| `ig_get_account_insights` | read | Get Instagram account insights. |
+| `ig_business_discovery` | read | Look up another Instagram Business/Creator account's public info by username (read through one of your accounts). |
+| `ig_get_collaboration_invites` | read | Get pending collaboration invites for the Instagram account. |
+| `ig_respond_collaboration_invite` | write | Accept or decline a collaboration invite. |
+| `ig_search_hashtag` | read | Search for a hashtag ID by name. |
+| `ig_get_hashtag` | read | Get hashtag information by ID. |
+| `ig_get_hashtag_recent` | read | Get recent media (last 24h) tagged with a specific hashtag. |
+| `ig_get_hashtag_top` | read | Get top (most popular) media tagged with a specific hashtag. |
+| `ig_get_mentioned_comments` | read | Get a comment where the account was @mentioned (comment ID from a mention webhook). |
+| `ig_get_mentioned_media` | read | Get a media post whose caption @mentions the account (media ID from a mention webhook). |
+| `ig_reply_to_mention` | write | Comment on a post (or reply to a comment) where the account was @mentioned. |
+| `ig_get_tagged_media` | read | Get media where the account is tagged (photo tags, not @mentions). |
+| `ig_get_conversations` | read | Get Instagram DM conversations of the account. |
+| `ig_get_messages` | read | Get messages in a specific DM conversation. |
+| `ig_get_message` | read | Get details of a specific DM message. |
+| `ig_send_message` | write | Send an Instagram DM: text (optionally with quick replies or as a reply to a message) or one attachment (image, video, audio or file, by public URL or attachment_id). |
+| `ig_private_reply` | write | Reply privately (in the DM inbox) to someone who commented on the account's post or reel. |
+| `ig_send_reaction` | write | React to (or remove the reaction from) a message in an Instagram DM conversation. |
+| `ig_sender_action` | write | Show a typing indicator or mark the conversation as seen in an Instagram DM. |
 
-| Tool | Description |
-|------|-------------|
-| `ig_get_media_list` | List published media |
-| `ig_get_media` | Get media details |
-| `ig_delete_media` | Delete a media post |
-| `ig_get_media_insights` | Get media analytics (views, reach, saved, shares) |
-| `ig_toggle_comments` | Enable/disable comments on a post |
+### Threads (28)
 
-### Instagram — Comments (7)
+| Tool | Kind | Description |
+|------|------|-------------|
+| `threads_publish_text` | write | Publish a text-only post on Threads. |
+| `threads_publish_image` | write | Publish an image post on Threads. |
+| `threads_publish_video` | write | Publish a video post on Threads. |
+| `threads_publish_carousel` | write | Publish a carousel post on Threads with 2-20 images/videos. |
+| `threads_repost` | write | Repost a Threads post to the account's profile. |
+| `threads_delete_post` | destructive | Delete a Threads post. |
+| `threads_get_container_status` | read | Check the processing status of a Threads media container: IN_PROGRESS, FINISHED (ready), PUBLISHED, ERROR (with error_message) or EXPIRED. |
+| `threads_get_publishing_limit` | read | Check the account's remaining Threads quotas in the current 24-hour window (posts, replies, deletes, location searches). |
+| `threads_get_posts` | read | Get a list of the account's published Threads posts. |
+| `threads_get_post` | read | Get details of a specific Threads post. |
+| `threads_get_profile_posts` | read | Get a public profile's posts by username (Profile Discovery). |
+| `threads_search_posts` | read | Search for public Threads posts by keyword or topic tag via the /keyword_search endpoint. |
+| `threads_get_replies` | read | Get top-level replies to a specific Threads post. |
+| `threads_get_conversation` | read | Get a flattened list of all replies (top-level and nested) to a Threads post, in chronological or reverse-chronological order. |
+| `threads_reply` | write | Reply to a Threads post or another reply as the account. |
+| `threads_hide_reply` | destructive | Hide a reply on your Threads post. |
+| `threads_unhide_reply` | destructive | Unhide a previously hidden reply on your Threads post. |
+| `threads_get_pending_replies` | read | Get pending/ignored replies awaiting approval on a post that has reply approvals enabled (enable_reply_approvals). |
+| `threads_manage_pending_reply` | write | Approve or ignore a pending reply on a post with reply approvals enabled. |
+| `threads_get_profile` | read | Get the account's Threads profile information including verification status. |
+| `threads_lookup_profile` | read | Look up a public Threads user's profile by username (Profile Discovery). |
+| `threads_get_user_threads` | read | Get all threads published by the account (lighter field set than threads_get_posts). |
+| `threads_get_post_insights` | read | Get insights for a specific Threads post (views, likes, replies, reposts, quotes, shares). |
+| `threads_get_user_insights` | read | Get account-level Threads insights: views, likes, replies, reposts, quotes, clicks (link clicks, returned as link_total_values), followers_count, follower_demographics (needs breakdown and 100+ followers). |
+| `threads_get_mentions` | read | Get public Threads posts where the account has been @mentioned by another profile. |
+| `threads_search_locations` | read | Search for locations to tag in a Threads post, by query text or by coordinates. |
+| `threads_get_location` | read | Get a Threads location object by ID (from threads_search_locations or a post's location_id field). |
+| `threads_get_oembed` | read | Get the embed HTML and metadata for a public Threads post, for rendering a rich preview on an external site. |
 
-| Tool | Description |
-|------|-------------|
-| `ig_get_comments` | Get comments on a post |
-| `ig_get_comment` | Get comment details |
-| `ig_post_comment` | Post a comment |
-| `ig_get_replies` | Get replies to a comment |
-| `ig_reply_to_comment` | Reply to a comment |
-| `ig_hide_comment` | Hide/unhide a comment |
-| `ig_delete_comment` | Delete a comment |
+### WhatsApp (20)
 
-### Instagram — Profile & Insights (5)
-
-| Tool | Description |
-|------|-------------|
-| `ig_get_profile` | Get account profile info |
-| `ig_get_account_insights` | Get account-level analytics (views, reach, follower_count) |
-| `ig_business_discovery` | Look up another business account |
-| `ig_get_collaboration_invites` | Get pending collaboration invites |
-| `ig_respond_collaboration_invite` | Accept or decline collaboration invites |
-
-### Instagram — Hashtags (4)
-
-| Tool | Description |
-|------|-------------|
-| `ig_search_hashtag` | Search hashtag by name |
-| `ig_get_hashtag` | Get hashtag info |
-| `ig_get_hashtag_recent` | Get recent media for a hashtag |
-| `ig_get_hashtag_top` | Get top media for a hashtag |
-
-### Instagram — Mentions & Tags (2)
-
-| Tool | Description |
-|------|-------------|
-| `ig_get_mentioned_comments` | Get comments mentioning you |
-| `ig_get_tagged_media` | Get media you're tagged in |
-
-### Instagram — Messaging (4)
-
-| Tool | Description |
-|------|-------------|
-| `ig_get_conversations` | List DM conversations |
-| `ig_get_messages` | Get messages in a conversation |
-| `ig_send_message` | Send a DM |
-| `ig_get_message` | Get message details |
-
-### Threads — Publishing (7)
-
-| Tool | Description |
-|------|-------------|
-| `threads_publish_text` | Publish a text post (polls, GIFs, link attachments, topic tags, quote posts, spoiler flag, ghost posts, reply approvals, location tag, IG Stories cross-share) |
-| `threads_publish_image` | Publish an image post (alt_text, topic tags, spoiler flag, reply approvals, location tag, IG Stories cross-share) |
-| `threads_publish_video` | Publish a video post (alt_text, topic tags, spoiler flag, reply approvals, location tag, IG Stories cross-share) |
-| `threads_publish_carousel` | Publish a carousel (2-20 items, alt_text per item, reply approvals, location tag, IG Stories cross-share) |
-| `threads_delete_post` | Delete a post (max 100/day) |
-| `threads_get_container_status` | Check container processing status |
-| `threads_get_publishing_limit` | Check remaining publishing quota (250 posts/day) |
-
-### Threads — Media & Search (4)
-
-| Tool | Description |
-|------|-------------|
-| `threads_get_posts` | List published posts (includes topic_tag, poll, GIF, location, verification fields) |
-| `threads_get_post` | Get post details |
-| `threads_get_profile_posts` | List a public profile's posts by username (Profile Discovery) |
-| `threads_search_posts` | Search public posts via `/keyword_search` by keyword or topic tag, filterable by media type and author |
-
-### Threads — Replies (7)
-
-| Tool | Description |
-|------|-------------|
-| `threads_get_replies` | Get top-level replies to a post |
-| `threads_get_conversation` | Get all replies (flattened, including nested) to a post |
-| `threads_reply` | Reply to a post (supports image/video attachments) |
-| `threads_hide_reply` | Hide a reply |
-| `threads_unhide_reply` | Unhide a reply |
-| `threads_get_pending_replies` | Get replies awaiting approval on a post with reply approvals enabled |
-| `threads_manage_pending_reply` | Approve or ignore a pending reply |
-
-### Threads — Profile & Discovery (3)
-
-| Tool | Description |
-|------|-------------|
-| `threads_get_profile` | Get Threads profile info (includes is_verified) |
-| `threads_get_user_threads` | List user's threads |
-| `threads_lookup_profile` | Look up a public profile by username (Profile Discovery) |
-
-### Threads — Mentions (1)
-
-| Tool | Description |
-|------|-------------|
-| `threads_get_mentions` | Get posts where the user was @mentioned |
-
-### Threads — Locations (2)
-
-| Tool | Description |
-|------|-------------|
-| `threads_search_locations` | Search for locations to tag, by query or coordinates |
-| `threads_get_location` | Get a location object by ID |
-
-### Threads — Tools & Resources (1)
-
-| Tool | Description |
-|------|-------------|
-| `threads_get_oembed` | Get embed HTML/metadata for a public post |
-
-### Threads — Insights (2)
-
-| Tool | Description |
-|------|-------------|
-| `threads_get_post_insights` | Get post analytics (views, likes, replies, reposts, quotes, clicks) |
-| `threads_get_user_insights` | Get account-level analytics (also available to Threads profiles without a linked Instagram account) |
+| Tool | Kind | Description |
+|------|------|-------------|
+| `whatsapp_send_text` | write | Send a WhatsApp text message from the account's number. |
+| `whatsapp_send_template` | write | Send an approved WhatsApp message template (works outside the 24-hour window; billed per message by category). |
+| `whatsapp_send_media` | write | Send an image, video, audio, document or sticker by public link or by media_id (from whatsapp_upload_media). |
+| `whatsapp_send_interactive` | write | Send an interactive message: reply buttons (up to 3, titles ≤20 chars), a list (up to 10 rows in total, row titles ≤24 chars), or a call-to-action URL button. |
+| `whatsapp_send_location` | write | Send a location pin. |
+| `whatsapp_send_reaction` | write | React to a customer's message with an emoji (empty emoji removes the reaction). |
+| `whatsapp_mark_as_read` | write | Mark a received message (and the earlier ones in the chat) as read; optionally show a typing indicator for up to 25 seconds. |
+| `whatsapp_upload_media` | write | Download a file from a public URL and upload it to WhatsApp for the account's number. |
+| `whatsapp_get_media` | read | Get a media object's metadata and a download URL (valid for 5 minutes, needs the WhatsApp token to download). |
+| `whatsapp_delete_media` | destructive | Delete an uploaded media object. |
+| `whatsapp_list_templates` | read | List the message templates of the account's WhatsApp Business Account with status (APPROVED, PENDING, REJECTED, PAUSED…), category, language and quality. |
+| `whatsapp_get_template` | read | Get one message template by its ID. |
+| `whatsapp_create_template` | write | Submit a new message template for Meta review (status starts as PENDING). |
+| `whatsapp_delete_template` | destructive | Delete a message template. |
+| `whatsapp_list_phone_numbers` | read | List the phone numbers of the account's WhatsApp Business Account with verified name, quality rating (GREEN/YELLOW/RED), name status and connection status. |
+| `whatsapp_get_business_profile` | read | Get the WhatsApp business profile (about, address, description, email, websites, vertical, photo) of the account's number. |
+| `whatsapp_update_business_profile` | write | Update the WhatsApp business profile of the account's number. |
+| `whatsapp_get_messaging_analytics` | read | Messaging analytics for the account's WhatsApp Business Account. |
+| `whatsapp_get_template_analytics` | read | Daily performance of up to 10 templates: sent, delivered, read, clicked (marketing/utility) and cost. |
+| `whatsapp_enable_template_insights` | write | Turn on template analytics for the account's WhatsApp Business Account. |
 
 ## Resources
 
-| Resource URI | Description |
-|-------------|-------------|
-| `instagram://profile` | Instagram account profile data |
-| `threads://profile` | Threads account profile data (includes is_verified) |
+| URI | Description |
+|-----|-------------|
+| `instagram://profile` | Default Instagram account profile |
+| `instagram://profile/{account}` | Profile of any Instagram account |
+| `threads://profile` | Default Threads account profile |
+| `threads://profile/{account}` | Profile of any Threads account |
 
 ## Prompts
 

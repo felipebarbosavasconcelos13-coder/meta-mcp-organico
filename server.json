@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.mikusnuz/meta",
-  "description": "MCP server for Instagram Graph API, Threads API & Meta platform management",
+  "name": "io.github.felipebarbosavasconcelos13-coder/meta-mcp-organico",
+  "description": "Multi-account MCP server for Instagram Graph API, Threads API, WhatsApp Cloud API & Meta platform management",
   "repository": {
-    "url": "https://github.com/mikusnuz/meta-mcp",
+    "url": "https://github.com/felipebarbosavasconcelos13-coder/meta-mcp-organico",
     "source": "github"
   },
-  "version": "2.2.2",
+  "version": "3.0.0",
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "@mikusnuz/meta-mcp",
-      "version": "2.2.2",
+      "identifier": "meta-mcp-organico",
+      "version": "3.0.0",
       "transport": {
         "type": "stdio"
       },
@@ -71,6 +71,62 @@
           "isRequired": false,
           "format": "string",
           "isSecret": true
+        },
+        {
+          "name": "WHATSAPP_ACCESS_TOKEN",
+          "description": "WhatsApp Cloud API system-user token",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "WHATSAPP_PHONE_NUMBER_ID",
+          "description": "Default WhatsApp phone number ID",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+          "description": "Default WhatsApp Business Account ID",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "WHATSAPP_BUSINESS_ID",
+          "description": "Business IDs to discover WhatsApp accounts from (comma-separated)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "META_ACCOUNTS_FILE",
+          "description": "Path to the accounts JSON file (aliases, Threads tokens by env var name)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "META_ALLOWED_ACCOUNTS",
+          "description": "Accounts write tools may target (comma-separated)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "META_ACCOUNTS_TTL",
+          "description": "Account discovery cache in seconds",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "META_EXPOSE_TOKENS",
+          "description": "Return full tokens from exchange/refresh tools",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ]
     }

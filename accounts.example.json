@@ -1,0 +1,26 @@
+{
+  "default": "genial",
+  "accounts": {
+    "genial": {
+      "label": "Genial Soluções Digitais",
+      "aliases": ["gsd"],
+      "instagram": "@genialsolucoesdigitais",
+      "threads": { "token_env": "THREADS_TOKEN_GENIAL" },
+      "whatsapp": "+55 11 99999-0000"
+    },
+    "rander": {
+      "label": "Dr. Rander",
+      "instagram": { "username": "drrander", "page_token_env": "PAGE_TOKEN_RANDER" },
+      "threads": { "token_env": "THREADS_TOKEN_RANDER", "username": "drrander" },
+      "whatsapp": {
+        "phone_number_id": "123456789012345",
+        "waba_id": "987654321098765",
+        "token_env": "WA_TOKEN_RANDER"
+      }
+    },
+    "bea": {
+      "label": "Brows with Bea",
+      "instagram": { "user_id": "17841400000000000", "token_env": "IG_TOKEN_BEA" }
+    }
+  }
+}
