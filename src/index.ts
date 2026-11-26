@@ -3,8 +3,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createRequire } from "node:module";
-import { loadConfig, MetaConfig } from "./config.js";
-import { MetaClient } from "./services/meta-client.js";
+import { realpathSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { emptyConfig, loadConfig, MetaConfig } from "./config.js";
+import { ClientOptions, MetaClient } from "./services/meta-client.js";
 
 // Meta platform tools
 import { registerMetaAuthTools } from "./tools/meta/auth.js";
@@ -28,6 +30,13 @@ import { registerThreadsMentionTools } from "./tools/threads/mentions.js";
 import { registerThreadsLocationTools } from "./tools/threads/locations.js";
 import { registerThreadsOembedTools } from "./tools/threads/oembed.js";
 
+// WhatsApp tools
+import { registerWhatsappMessageTools } from "./tools/whatsapp/messages.js";
+import { registerWhatsappMediaTools } from "./tools/whatsapp/media.js";
+import { registerWhatsappTemplateTools } from "./tools/whatsapp/templates.js";
+import { registerWhatsappAccountTools } from "./tools/whatsapp/account.js";
+import { registerWhatsappAnalyticsTools } from "./tools/whatsapp/analytics.js";
+
 // Resources & Prompts
 import { registerInstagramResources } from "./resources/instagram.js";
 import { registerThreadsResources } from "./resources/threads.js";
@@ -35,88 +44,62 @@ import { registerPrompts } from "./prompts/index.js";
 
 const { version } = createRequire(import.meta.url)("../package.json");
 
-const server = new McpServer({
-  name: "meta-mcp",
-  version,
-});
+/** Build a server with every tool, resource and prompt registered. */
+export function createServer(config: MetaConfig = loadConfig(), options: ClientOptions = {}): { server: McpServer; client: MetaClient } {
+  const server = new McpServer({ name: "meta-mcp", version });
+  const client = new MetaClient(config, options);
 
-const config = loadConfig();
-const client = new MetaClient(config);
+  registerMetaAuthTools(server, client);
+  registerIgPublishingTools(server, client);
+  registerIgMediaTools(server, client);
+  registerIgCommentTools(server, client);
+  registerIgProfileTools(server, client);
+  registerIgHashtagTools(server, client);
+  registerIgMentionTools(server, client);
+  registerIgMessagingTools(server, client);
+  registerThreadsPublishingTools(server, client);
+  registerThreadsMediaTools(server, client);
+  registerThreadsReplyTools(server, client);
+  registerThreadsProfileTools(server, client);
+  registerThreadsInsightTools(server, client);
+  registerThreadsMentionTools(server, client);
+  registerThreadsLocationTools(server, client);
+  registerThreadsOembedTools(server, client);
+  registerWhatsappMessageTools(server, client);
+  registerWhatsappMediaTools(server, client);
+  registerWhatsappTemplateTools(server, client);
+  registerWhatsappAccountTools(server, client);
+  registerWhatsappAnalyticsTools(server, client);
+  registerInstagramResources(server, client);
+  registerThreadsResources(server, client);
+  registerPrompts(server);
 
-// Register tools
-registerMetaAuthTools(server, client);
-registerIgPublishingTools(server, client);
-registerIgMediaTools(server, client);
-registerIgCommentTools(server, client);
-registerIgProfileTools(server, client);
-registerIgHashtagTools(server, client);
-registerIgMentionTools(server, client);
-registerIgMessagingTools(server, client);
-registerThreadsPublishingTools(server, client);
-registerThreadsMediaTools(server, client);
-registerThreadsReplyTools(server, client);
-registerThreadsProfileTools(server, client);
-registerThreadsInsightTools(server, client);
-registerThreadsMentionTools(server, client);
-registerThreadsLocationTools(server, client);
-registerThreadsOembedTools(server, client);
-
-// Register resources
-registerInstagramResources(server, client);
-registerThreadsResources(server, client);
-
-// Register prompts
-registerPrompts(server);
-
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  return { server, client };
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
-
 // ── Smithery Sandbox ──
-
 export function createSandboxServer() {
-  const sandbox = new McpServer({
-    name: "meta-mcp",
-    version,
+  return createServer(emptyConfig()).server;
+}
+
+async function main() {
+  const { server } = createServer();
+  await server.connect(new StdioServerTransport());
+}
+
+function isEntrypoint(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    // npx/bin links point at a symlink; compare real paths.
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  }
+}
+
+if (isEntrypoint()) {
+  main().catch((err) => {
+    console.error("Fatal error:", err);
+    process.exit(1);
   });
-
-  const mockConfig: MetaConfig = {
-    appId: "",
-    appSecret: "",
-    instagramAccessToken: "",
-    instagramUserId: "",
-    instagramMessagingAccessToken: "",
-    instagramPageId: "",
-    threadsAccessToken: "",
-    threadsUserId: "",
-  };
-  const mockClient = new MetaClient(mockConfig);
-
-  registerMetaAuthTools(sandbox, mockClient);
-  registerIgPublishingTools(sandbox, mockClient);
-  registerIgMediaTools(sandbox, mockClient);
-  registerIgCommentTools(sandbox, mockClient);
-  registerIgProfileTools(sandbox, mockClient);
-  registerIgHashtagTools(sandbox, mockClient);
-  registerIgMentionTools(sandbox, mockClient);
-  registerIgMessagingTools(sandbox, mockClient);
-  registerThreadsPublishingTools(sandbox, mockClient);
-  registerThreadsMediaTools(sandbox, mockClient);
-  registerThreadsReplyTools(sandbox, mockClient);
-  registerThreadsProfileTools(sandbox, mockClient);
-  registerThreadsInsightTools(sandbox, mockClient);
-  registerThreadsMentionTools(sandbox, mockClient);
-  registerThreadsLocationTools(sandbox, mockClient);
-  registerThreadsOembedTools(sandbox, mockClient);
-  registerInstagramResources(sandbox, mockClient);
-  registerThreadsResources(sandbox, mockClient);
-  registerPrompts(sandbox);
-
-  return sandbox;
 }

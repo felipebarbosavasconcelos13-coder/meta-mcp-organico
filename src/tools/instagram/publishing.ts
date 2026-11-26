@@ -2,7 +2,13 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MetaClient } from "../../services/meta-client.js";
 import { buildInstagramStoryParams } from "../../services/api-contracts.js";
-import { waitForContainerStatus } from "../../services/container-polling.js";
+import {
+  createAndPublishIg,
+  createIgContainer,
+  publishIgContainer,
+  waitForIgContainer,
+} from "../../services/publishing.js";
+import { defineTool } from "../define.js";
 
 const disclosureOptions = {
   is_ai_generated: z.boolean().optional().describe("Apply the AI info label to the published media"),
@@ -10,226 +16,218 @@ const disclosureOptions = {
   branded_content_sponsor_ids: z.array(z.string()).max(2).optional().describe("Instagram user IDs of up to two brand partners"),
 };
 
+const collaborators = z
+  .array(z.string().regex(/^[A-Za-z0-9._]+$/))
+  .max(3)
+  .optional()
+  .describe("Up to 3 Instagram usernames (without @) invited as collaborators (feed posts, reels and carousels; not stories)");
+
+const userTag = z.object({
+  username: z.string().regex(/^[A-Za-z0-9._]+$/),
+  x: z.number().min(0).max(1).optional(),
+  y: z.number().min(0).max(1).optional(),
+});
+
+const userTags = z
+  .union([z.string(), z.array(userTag)])
+  .optional()
+  .describe("Users to tag: array of {username, x, y} (x/y 0-1 for images; omit for videos/reels), or the same as a JSON string");
+
 const trialParams = z.object({
   graduation_strategy: z.enum(["MANUAL", "SS_PERFORMANCE"]),
 }).optional().describe("Publish as a Trial Reel; graduate manually or automatically based on performance");
 
-/** Wait for image, video, or carousel processing before publishing. */
-async function waitForContainer(
-  client: MetaClient,
-  containerId: string,
-  maxWaitSeconds = 300
-): Promise<void> {
-  await waitForContainerStatus(
-    async () => {
-      const { data } = await client.ig("GET", `/${containerId}`, {
-        fields: "status_code",
-      });
-      return (data as { status_code?: string }).status_code;
-    },
-    {
-      intervalMs: 60_000,
-      maxWaitMs: maxWaitSeconds * 1000,
-      label: "Instagram container",
-    }
-  );
+function parseUserTags(value: string | Array<z.infer<typeof userTag>> | undefined) {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) throw new Error();
+    return z.array(userTag).parse(parsed);
+  } catch {
+    throw new Error("user_tags must be an array of {username, x, y} or its JSON string.");
+  }
+}
+
+function assign(params: Record<string, unknown>, values: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)) params[key] = value;
+  }
+  return params;
 }
 
 export function registerIgPublishingTools(server: McpServer, client: MetaClient): void {
-  // ─── ig_publish_photo ────────────────────────────────────────
-  server.tool(
-    "ig_publish_photo",
-    "Publish a photo to Instagram. Two-step process: creates container then publishes. Requires image_url (publicly accessible HTTPS URL).",
-    {
+  defineTool(server, client, {
+    name: "ig_publish_photo",
+    description: "Publish a photo to an Instagram account. Creates the container, waits until it is ready, then publishes. Requires image_url (public HTTPS JPEG).",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Publish photo failed",
+    schema: {
       image_url: z.string().url().describe("Public HTTPS URL of the image (JPEG only)"),
-      caption: z.string().optional().describe("Post caption (max 2200 chars)"),
+      caption: z.string().max(2200).optional().describe("Post caption (max 2200 chars)"),
       location_id: z.string().optional().describe("Facebook Page location ID"),
-      user_tags: z.string().optional().describe("JSON array of user tags: [{username, x, y}]"),
-      alt_text: z.string().optional().describe("Alt text for accessibility"),
+      user_tags: userTags,
+      collaborators,
+      alt_text: z.string().max(1000).optional().describe("Alt text for accessibility (max 1000 chars)"),
       ...disclosureOptions,
     },
-    async ({ image_url, caption, location_id, user_tags, alt_text, ...disclosures }) => {
-      try {
-        const params: Record<string, unknown> = { image_url, ...disclosures };
-        if (caption) params.caption = caption;
-        if (location_id) params.location_id = location_id;
-        if (user_tags) params.user_tags = user_tags;
-        if (alt_text) params.alt_text = alt_text;
-        // Step 1: Create container
-        const { data: container } = await client.ig("POST", `/${client.igUserId}/media`, params);
-        const containerId = (container as { id: string }).id;
-        await waitForContainer(client, containerId);
-        // Step 2: Publish
-        const { data, rateLimit } = await client.ig("POST", `/${client.igUserId}/media_publish`, {
-          creation_id: containerId,
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Publish photo failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ image_url, caption, location_id, user_tags, collaborators, alt_text, ...disclosures }, c) =>
+      createAndPublishIg(c, assign({ image_url, ...disclosures }, {
+        caption,
+        location_id,
+        user_tags: parseUserTags(user_tags),
+        collaborators,
+        alt_text,
+      })),
+  });
 
-  // ─── ig_publish_video ────────────────────────────────────────
-  server.tool(
-    "ig_publish_video",
-    "Publish a standalone video as a Reel and share it to the feed. Waits for video processing before publishing.",
-    {
+  defineTool(server, client, {
+    name: "ig_publish_video",
+    description: "Publish a standalone video as a Reel and share it to the feed. Waits for video processing before publishing.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Publish video failed",
+    schema: {
       video_url: z.string().url().describe("Public HTTPS URL of the video"),
-      caption: z.string().optional().describe("Post caption"),
+      caption: z.string().max(2200).optional().describe("Post caption"),
       thumb_offset: z.number().optional().describe("Thumbnail offset in ms"),
       location_id: z.string().optional().describe("Facebook Page location ID"),
+      user_tags: userTags,
+      collaborators,
+      audio_name: z.string().optional().describe("Name for the Reel's original audio"),
       trial_params: trialParams,
       ...disclosureOptions,
     },
-    async ({ video_url, caption, thumb_offset, location_id, ...options }) => {
-      try {
-        const params: Record<string, unknown> = { video_url, media_type: "REELS", share_to_feed: true, ...options };
-        if (caption) params.caption = caption;
-        if (thumb_offset !== undefined) params.thumb_offset = thumb_offset;
-        if (location_id) params.location_id = location_id;
-        const { data: container } = await client.ig("POST", `/${client.igUserId}/media`, params);
-        const containerId = (container as { id: string }).id;
-        await waitForContainer(client, containerId);
-        const { data, rateLimit } = await client.ig("POST", `/${client.igUserId}/media_publish`, {
-          creation_id: containerId,
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Publish video failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ video_url, caption, thumb_offset, location_id, user_tags, collaborators, audio_name, ...options }, c) => {
+      const params: Record<string, unknown> = { video_url, media_type: "REELS", share_to_feed: true, ...options };
+      if (thumb_offset !== undefined) params.thumb_offset = thumb_offset;
+      return createAndPublishIg(c, assign(params, {
+        caption,
+        location_id,
+        user_tags: parseUserTags(user_tags),
+        collaborators,
+        audio_name,
+      }));
+    },
+  });
 
-  // ─── ig_publish_carousel ─────────────────────────────────────
-  server.tool(
-    "ig_publish_carousel",
-    "Publish a carousel (album) post with 2-10 images/videos. Each item needs an image_url or video_url.",
-    {
+  defineTool(server, client, {
+    name: "ig_publish_carousel",
+    description: "Publish a carousel (album) post with 2-10 images/videos. Each item needs a public URL; every child and the album wait for processing before publishing.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Publish carousel failed",
+    schema: {
       items: z.array(z.object({
         type: z.enum(["IMAGE", "VIDEO"]).describe("Media type"),
         url: z.string().url().describe("Public HTTPS URL of the media"),
-        alt_text: z.string().optional().describe("Alt text for this image item"),
+        alt_text: z.string().max(1000).optional().describe("Alt text for this image item"),
+        user_tags: z.array(userTag).optional().describe("Users tagged on this image item ({username, x, y})"),
       })).min(2).max(10).describe("Array of media items"),
-      caption: z.string().optional().describe("Post caption"),
+      caption: z.string().max(2200).optional().describe("Post caption"),
       location_id: z.string().optional().describe("Facebook Page location ID"),
+      collaborators,
       ...disclosureOptions,
     },
-    async ({ items, caption, location_id, ...disclosures }) => {
-      try {
-        // Step 1: Create child containers
-        const childIds: string[] = [];
-        for (const item of items) {
-          const params: Record<string, unknown> = { is_carousel_item: true };
-          if (item.type === "IMAGE") {
-            params.image_url = item.url;
-            if (item.alt_text) params.alt_text = item.alt_text;
-          } else {
-            params.video_url = item.url;
-            params.media_type = "VIDEO";
-          }
-          const { data: child } = await client.ig("POST", `/${client.igUserId}/media`, params);
-          const childId = (child as { id: string }).id;
-          await waitForContainer(client, childId);
-          childIds.push(childId);
+    handler: async ({ items, caption, location_id, collaborators, ...disclosures }, c) => {
+      const childIds: string[] = [];
+      for (const item of items) {
+        const params: Record<string, unknown> = { is_carousel_item: true };
+        if (item.type === "IMAGE") {
+          params.image_url = item.url;
+          if (item.alt_text) params.alt_text = item.alt_text;
+          if (item.user_tags?.length) params.user_tags = item.user_tags;
+        } else {
+          params.video_url = item.url;
+          params.media_type = "VIDEO";
         }
-        // Step 2: Create carousel container
-        const carouselParams: Record<string, unknown> = {
-          media_type: "CAROUSEL",
-          children: childIds.join(","),
-          ...disclosures,
-        };
-        if (caption) carouselParams.caption = caption;
-        if (location_id) carouselParams.location_id = location_id;
-        const { data: carousel } = await client.ig("POST", `/${client.igUserId}/media`, carouselParams);
-        const carouselId = (carousel as { id: string }).id;
-        await waitForContainer(client, carouselId);
-        // Step 3: Publish
-        const { data, rateLimit } = await client.ig("POST", `/${client.igUserId}/media_publish`, {
-          creation_id: carouselId,
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Publish carousel failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+        const childId = await createIgContainer(c, params);
+        await waitForIgContainer(c, childId);
+        childIds.push(childId);
       }
-    }
-  );
+      const carouselId = await createIgContainer(c, assign(
+        { media_type: "CAROUSEL", children: childIds.join(","), ...disclosures },
+        { caption, location_id, collaborators }
+      ));
+      await waitForIgContainer(c, carouselId);
+      return publishIgContainer(c, carouselId);
+    },
+  });
 
-  // ─── ig_publish_reel ─────────────────────────────────────────
-  server.tool(
-    "ig_publish_reel",
-    "Publish a Reel (short video). Waits for video processing.",
-    {
+  defineTool(server, client, {
+    name: "ig_publish_reel",
+    description: "Publish a Reel (short video). Waits for video processing.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Publish reel failed",
+    schema: {
       video_url: z.string().url().describe("Public HTTPS URL of the video"),
-      caption: z.string().optional().describe("Reel caption"),
+      caption: z.string().max(2200).optional().describe("Reel caption"),
       cover_url: z.string().optional().describe("Custom cover image URL"),
       share_to_feed: z.boolean().optional().describe("Also share to feed (default true)"),
       thumb_offset: z.number().optional().describe("Thumbnail offset in ms"),
-      alt_text: z.string().optional().describe("Alt text for accessibility"),
+      alt_text: z.string().max(1000).optional().describe("Alt text for accessibility"),
+      location_id: z.string().optional().describe("Facebook Page location ID"),
+      user_tags: userTags,
+      collaborators,
+      audio_name: z.string().optional().describe("Name for the Reel's original audio"),
       trial_params: trialParams,
       ...disclosureOptions,
     },
-    async ({ video_url, caption, cover_url, share_to_feed, thumb_offset, alt_text, ...options }) => {
-      try {
-        const params: Record<string, unknown> = { video_url, media_type: "REELS", ...options };
-        if (caption) params.caption = caption;
-        if (cover_url) params.cover_url = cover_url;
-        if (share_to_feed !== undefined) params.share_to_feed = share_to_feed;
-        if (thumb_offset !== undefined) params.thumb_offset = thumb_offset;
-        if (alt_text) params.alt_text = alt_text;
-        const { data: container } = await client.ig("POST", `/${client.igUserId}/media`, params);
-        const containerId = (container as { id: string }).id;
-        await waitForContainer(client, containerId);
-        const { data, rateLimit } = await client.ig("POST", `/${client.igUserId}/media_publish`, {
-          creation_id: containerId,
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Publish reel failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ video_url, caption, cover_url, share_to_feed, thumb_offset, alt_text, location_id, user_tags, collaborators, audio_name, ...options }, c) => {
+      const params: Record<string, unknown> = { video_url, media_type: "REELS", ...options };
+      if (share_to_feed !== undefined) params.share_to_feed = share_to_feed;
+      if (thumb_offset !== undefined) params.thumb_offset = thumb_offset;
+      return createAndPublishIg(c, assign(params, {
+        caption,
+        cover_url,
+        alt_text,
+        location_id,
+        user_tags: parseUserTags(user_tags),
+        collaborators,
+        audio_name,
+      }));
+    },
+  });
 
-  // ─── ig_publish_story ────────────────────────────────────────
-  server.tool(
-    "ig_publish_story",
-    "Publish a Story (image or video). Stories disappear after 24 hours.",
-    {
+  defineTool(server, client, {
+    name: "ig_publish_story",
+    description: "Publish a Story (image or video). Stories disappear after 24 hours.",
+    platform: "instagram",
+    kind: "write",
+    errorLabel: "Publish story failed",
+    schema: {
       media_type: z.enum(["IMAGE", "VIDEO"]).describe("Story media type"),
       media_url: z.string().url().describe("Public HTTPS URL of the media"),
+      user_tags: userTags,
     },
-    async ({ media_type, media_url }) => {
-      try {
-        const params = buildInstagramStoryParams(media_type, media_url);
-        const { data: container } = await client.ig("POST", `/${client.igUserId}/media`, params);
-        const containerId = (container as { id: string }).id;
-        await waitForContainer(client, containerId);
-        const { data, rateLimit } = await client.ig("POST", `/${client.igUserId}/media_publish`, {
-          creation_id: containerId,
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Publish story failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ media_type, media_url, user_tags }, c) =>
+      createAndPublishIg(c, assign(buildInstagramStoryParams(media_type, media_url), {
+        user_tags: parseUserTags(user_tags),
+      })),
+  });
 
-  // ─── ig_get_container_status ─────────────────────────────────
-  server.tool(
-    "ig_get_container_status",
-    "Check the processing status of a media container (useful for videos).",
-    {
+  defineTool(server, client, {
+    name: "ig_get_container_status",
+    description: "Check the processing status of a media container: IN_PROGRESS, FINISHED (ready), PUBLISHED, ERROR or EXPIRED. Use it before retrying a publish that failed.",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get container status failed",
+    schema: {
       container_id: z.string().describe("Container ID to check"),
     },
-    async ({ container_id }) => {
-      try {
-        const { data, rateLimit } = await client.ig("GET", `/${container_id}`, {
-          fields: "id,status,status_code",
-        });
-        return { content: [{ type: "text", text: JSON.stringify({ ...data as object, _rateLimit: rateLimit }, null, 2) }] };
-      } catch (error) {
-        return { content: [{ type: "text", text: `Get container status failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-      }
-    }
-  );
+    handler: async ({ container_id }, c) => c.ig("GET", `/${container_id}`, { fields: "id,status,status_code" }),
+  });
+
+  defineTool(server, client, {
+    name: "ig_get_publishing_limit",
+    description: "Check how many posts the Instagram account has published in the current 24-hour window and its quota (content_publishing_limit).",
+    platform: "instagram",
+    kind: "read",
+    errorLabel: "Get publishing limit failed",
+    schema: {},
+    handler: async (_args, c) =>
+      c.ig("GET", `/${c.igUserId}/content_publishing_limit`, { fields: "config,quota_usage" }),
+  });
 }
