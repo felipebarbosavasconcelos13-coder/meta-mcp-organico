@@ -23,6 +23,9 @@ export interface HandlerOutput {
 
 type Kind = "read" | "write" | "destructive";
 
+/** Parsed handler arguments for a raw zod shape. */
+type Args<S extends z.ZodRawShape> = z.infer<z.ZodObject<S>>;
+
 interface BaseSpec<S extends z.ZodRawShape> {
   name: string;
   description: string;
@@ -37,12 +40,12 @@ interface BaseSpec<S extends z.ZodRawShape> {
 
 interface ScopedSpec<S extends z.ZodRawShape> extends BaseSpec<S> {
   platform: Platform;
-  handler: (args: z.objectOutputType<S, z.ZodTypeAny>, c: ScopedClient) => Promise<HandlerOutput>;
+  handler: (args: Args<S>, c: ScopedClient) => Promise<HandlerOutput>;
 }
 
 interface GlobalSpec<S extends z.ZodRawShape> extends BaseSpec<S> {
   platform?: undefined;
-  handler: (args: z.objectOutputType<S, z.ZodTypeAny>, client: MetaClient) => Promise<HandlerOutput>;
+  handler: (args: Args<S>, client: MetaClient) => Promise<HandlerOutput>;
 }
 
 export function ok(output: HandlerOutput, account?: { key: string; label?: string }): ToolResult {
@@ -89,10 +92,10 @@ export function defineTool<S extends z.ZodRawShape>(
         if (spec.platform) {
           const { account, ...args } = rawArgs as { account?: string };
           const scoped = await client.scope(account, spec.platform, { write: spec.kind !== "read" });
-          const output = await spec.handler(args as z.objectOutputType<S, z.ZodTypeAny>, scoped);
+          const output = await spec.handler(args as Args<S>, scoped);
           return ok(output, scoped.account);
         }
-        const output = await (spec as GlobalSpec<S>).handler(rawArgs as z.objectOutputType<S, z.ZodTypeAny>, client);
+        const output = await (spec as GlobalSpec<S>).handler(rawArgs as Args<S>, client);
         return ok(output);
       } catch (error) {
         return fail(spec.errorLabel, error);

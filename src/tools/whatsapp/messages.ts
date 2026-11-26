@@ -57,7 +57,7 @@ export function registerWhatsappMessageTools(server: McpServer, client: MetaClie
       to,
       template_name: z.string().describe("Approved template name"),
       language: z.string().describe("Template language code, e.g. pt_BR, en_US"),
-      components: z.array(z.record(z.unknown())).optional().describe("Template components with parameters (header, body, button)"),
+      components: z.array(z.record(z.string(), z.unknown())).optional().describe("Template components with parameters (header, body, button)"),
       reply_to_message_id: replyTo,
     },
     handler: async ({ to: number, template_name, language, components, reply_to_message_id }, c) =>
