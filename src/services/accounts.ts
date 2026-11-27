@@ -548,7 +548,8 @@ export class AccountRegistry {
     if (!path) return;
     let file: AccountsFile;
     try {
-      file = parseAccountsFile(JSON.parse(this.readFile(path)));
+      // Strip a UTF-8 BOM: Windows PowerShell 5.1 writes one with -Encoding utf8.
+      file = parseAccountsFile(JSON.parse(this.readFile(path).replace(/^﻿/, "")));
     } catch (error) {
       this.errors.push(`Accounts file ${path}: ${error instanceof Error ? error.message : String(error)}`);
       return;

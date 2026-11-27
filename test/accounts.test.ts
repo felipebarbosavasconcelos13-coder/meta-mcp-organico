@@ -92,6 +92,16 @@ test("accounts file adds aliases, default, Threads tokens by env name and links 
   assert.equal((await client.accounts.all()).filter((r) => r.instagram?.userId === "ig2").length, 1);
 });
 
+test("accounts file with a UTF-8 BOM is accepted", async () => {
+  const { client } = makeClient(
+    { instagramAccessToken: "USER_TOKEN_123456", accountsFile: "bom.json" },
+    igRoute,
+    { files: { "bom.json": "﻿" + JSON.stringify({ default: "rander", accounts: { rander: { instagram: "@drrander" } } }) } }
+  );
+  assert.equal((await client.accounts.resolve(undefined, "instagram")).key, "rander");
+  assert.deepEqual(client.accounts.errors, []);
+});
+
 test("invalid accounts file is reported, not fatal", async () => {
   const { client } = makeClient(
     { instagramAccessToken: "USER_TOKEN_123456", accountsFile: "bad.json" },
